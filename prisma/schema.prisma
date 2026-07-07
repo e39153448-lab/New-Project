@@ -1,0 +1,392 @@
+// Rocket Club Math at Home — data model
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Enums (fixed workflow states) ──────────────────────────────────────────
+
+enum Role {
+  parent
+  caregiver
+  admin
+}
+
+enum MembershipStatus {
+  inquiry
+  free_trial
+  active
+  past_due
+  canceled
+}
+
+enum InquiryStatus {
+  new
+  contacted
+  call_booked
+  training_booked
+  enrolled
+  lost
+}
+
+enum InviteStatus {
+  pending
+  accepted
+}
+
+enum MilestoneStatus {
+  locked
+  available
+  completed
+}
+
+enum MissionStatus {
+  not_started
+  in_progress
+  completed
+}
+
+enum CardStatus {
+  locked
+  unlocked
+  collected
+}
+
+enum CertificationStatus {
+  locked
+  available
+  in_progress
+  passed
+  failed
+}
+
+enum ShipmentStatus {
+  not_prepared
+  preparing
+  shipped
+  delivered
+}
+
+// ── Users & Families ────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  createdAt    DateTime @default(now())
+
+  familiesAsParent Family[]         @relation("FamilyParent")
+  caregiverOf      ChildCaregiver[]
+}
+
+model Family {
+  id               String           @id @default(cuid())
+  parentUserId     String
+  parentUser       User             @relation("FamilyParent", fields: [parentUserId], references: [id], onDelete: Cascade)
+  membershipStatus MembershipStatus @default(free_trial)
+  trialStartDate   DateTime?
+  trialEndDate     DateTime?
+  stripeCustomerId String?
+  createdAt        DateTime         @default(now())
+
+  children         Child[]
+  caregiverInvites CaregiverInvite[]
+}
+
+model Child {
+  id                     String         @id @default(cuid())
+  familyId               String
+  family                 Family         @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  firstName              String
+  age                    Int
+  gradeLevel             String
+  currentLevel           String
+  rocketFuel             Int            @default(0)
+  currentCertificationId String?
+  currentCertification   Certification? @relation("ChildCurrentCertification", fields: [currentCertificationId], references: [id])
+  createdAt              DateTime       @default(now())
+
+  caregiverInvites       CaregiverInvite[]
+  childCaregivers        ChildCaregiver[]
+  childMilestones        ChildMilestone[]
+  childMissions          ChildMission[]
+  childCards             ChildCard[]
+  childCertifications    ChildCertification[]
+  shipments              Shipment[]
+  rocketFuelTransactions RocketFuelTransaction[]
+}
+
+model CaregiverInvite {
+  id             String       @id @default(cuid())
+  familyId       String
+  family         Family       @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  childId        String
+  child          Child        @relation(fields: [childId], references: [id], onDelete: Cascade)
+  caregiverEmail String
+  caregiverName  String?
+  status         InviteStatus @default(pending)
+  token          String       @unique @default(cuid())
+  createdAt      DateTime     @default(now())
+}
+
+model ChildCaregiver {
+  id              String   @id @default(cuid())
+  childId         String
+  child           Child    @relation(fields: [childId], references: [id], onDelete: Cascade)
+  caregiverUserId String
+  caregiverUser   User     @relation(fields: [caregiverUserId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+
+  @@unique([childId, caregiverUserId])
+}
+
+// ── Inquiries (marketing funnel) ────────────────────────────────────────────
+
+model Inquiry {
+  id              String        @id @default(cuid())
+  parentFirstName String
+  parentLastName  String
+  email           String
+  phone           String
+  childFirstName  String
+  childAge        Int
+  childGrade      String
+  facilitatorType String
+  caregiverName   String?
+  city            String
+  state           String
+  zip             String
+  goal            String
+  notes           String?
+  status          InquiryStatus @default(new)
+  createdAt       DateTime      @default(now())
+}
+
+// ── Milestones ───────────────────────────────────────────────────────────--
+
+model Milestone {
+  id           String @id @default(cuid())
+  level        String
+  title        String
+  description  String
+  instructions String
+  sortOrder    Int
+
+  childMilestones         ChildMilestone[]
+  certificationMilestones CertificationMilestone[]
+  relatedInMissions       Mission[]                @relation("MissionMilestones")
+}
+
+model ChildMilestone {
+  id          String          @id @default(cuid())
+  childId     String
+  child       Child           @relation(fields: [childId], references: [id], onDelete: Cascade)
+  milestoneId String
+  milestone   Milestone       @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  status      MilestoneStatus @default(locked)
+  completedAt DateTime?
+
+  @@unique([childId, milestoneId])
+}
+
+// ── Missions ────────────────────────────────────────────────────────────--
+
+model Mission {
+  id                    String     @id @default(cuid())
+  title                 String
+  theme                 String
+  weekNumber            Int
+  description           String
+  level                 String
+  characterId           String?
+  character             Character? @relation(fields: [characterId], references: [id])
+  caregiverInstructions String
+  rocketFuelReward      Int
+  createdAt             DateTime   @default(now())
+
+  sections          MissionSection[]
+  questions         MissionQuestion[]
+  childMissions     ChildMission[]
+  relatedMilestones Milestone[]       @relation("MissionMilestones")
+}
+
+model MissionSection {
+  id        String  @id @default(cuid())
+  missionId String
+  mission   Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  title     String
+  content   String
+  sortOrder Int
+
+  childMissionSections ChildMissionSection[]
+}
+
+model MissionQuestion {
+  id               String  @id @default(cuid())
+  missionId        String
+  mission          Mission @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  gradeLevel       String
+  question         String
+  answer           String
+  choices          Json?
+  rocketFuelReward Int
+}
+
+model ChildMission {
+  id          String        @id @default(cuid())
+  childId     String
+  child       Child         @relation(fields: [childId], references: [id], onDelete: Cascade)
+  missionId   String
+  mission     Mission       @relation(fields: [missionId], references: [id], onDelete: Cascade)
+  status               MissionStatus @default(not_started)
+  startedAt            DateTime?
+  completedAt          DateTime?
+  worksheetCompletedAt DateTime?
+
+  childMissionSections ChildMissionSection[]
+
+  @@unique([childId, missionId])
+}
+
+model ChildMissionSection {
+  id               String         @id @default(cuid())
+  childMissionId   String
+  childMission     ChildMission   @relation(fields: [childMissionId], references: [id], onDelete: Cascade)
+  missionSectionId String
+  missionSection   MissionSection @relation(fields: [missionSectionId], references: [id], onDelete: Cascade)
+  completedAt      DateTime?
+
+  @@unique([childMissionId, missionSectionId])
+}
+
+// ── Characters & Cards ──────────────────────────────────────────────────--
+
+model Character {
+  id          String   @id @default(cuid())
+  name        String
+  description String
+  superpower  String
+  imageUrl    String
+  createdAt   DateTime @default(now())
+
+  cards    Card[]
+  missions Mission[]
+}
+
+model Card {
+  id             String    @id @default(cuid())
+  characterId    String
+  character      Character @relation(fields: [characterId], references: [id], onDelete: Cascade)
+  name           String
+  rarity         String
+  rocketFuelCost Int
+  imageUrl       String
+  description    String
+
+  childCards ChildCard[]
+}
+
+model ChildCard {
+  id          String     @id @default(cuid())
+  childId     String
+  child       Child      @relation(fields: [childId], references: [id], onDelete: Cascade)
+  cardId      String
+  card        Card       @relation(fields: [cardId], references: [id], onDelete: Cascade)
+  status      CardStatus @default(locked)
+  collectedAt DateTime?
+
+  @@unique([childId, cardId])
+}
+
+// ── Pins & Certifications ───────────────────────────────────────────────--
+
+model Pin {
+  id          String @id @default(cuid())
+  name        String
+  level       String
+  description String
+  imageUrl    String
+
+  certifications Certification[]
+}
+
+model Certification {
+  id               String @id @default(cuid())
+  name             String
+  level            String
+  description      String
+  pinId            String
+  pin              Pin    @relation(fields: [pinId], references: [id])
+  rocketFuelReward Int
+
+  certificationMilestones CertificationMilestone[]
+  childCertifications     ChildCertification[]
+  childrenCurrentlyOn     Child[]                  @relation("ChildCurrentCertification")
+}
+
+model CertificationMilestone {
+  id              String        @id @default(cuid())
+  certificationId String
+  certification   Certification @relation(fields: [certificationId], references: [id], onDelete: Cascade)
+  milestoneId     String
+  milestone       Milestone     @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  @@unique([certificationId, milestoneId])
+}
+
+model ChildCertification {
+  id              String              @id @default(cuid())
+  childId         String
+  child           Child               @relation(fields: [childId], references: [id], onDelete: Cascade)
+  certificationId String
+  certification   Certification       @relation(fields: [certificationId], references: [id], onDelete: Cascade)
+  status          CertificationStatus @default(locked)
+  passedAt        DateTime?
+
+  @@unique([childId, certificationId])
+}
+
+// ── Shipments ────────────────────────────────────────────────────────────--
+
+model Shipment {
+  id             String         @id @default(cuid())
+  childId        String
+  child          Child          @relation(fields: [childId], references: [id], onDelete: Cascade)
+  month          String
+  status         ShipmentStatus @default(not_prepared)
+  trackingNumber String?
+  notes          String?
+  createdAt      DateTime       @default(now())
+
+  items ShipmentItem[]
+}
+
+model ShipmentItem {
+  id         String   @id @default(cuid())
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  itemType   String
+  itemName   String
+  quantity   Int      @default(1)
+}
+
+// ── Rocket Fuel ledger ───────────────────────────────────────────────────--
+
+model RocketFuelTransaction {
+  id         String   @id @default(cuid())
+  childId    String
+  child      Child    @relation(fields: [childId], references: [id], onDelete: Cascade)
+  amount     Int
+  reason     String
+  sourceType String
+  sourceId   String?
+  createdAt  DateTime @default(now())
+}
